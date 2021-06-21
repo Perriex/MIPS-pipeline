@@ -5,25 +5,32 @@ module DataPath (clk, regSrc, regDst, pcSrc, ALUSrc, ALUOp, regWrite, memWrite, 
 
     //pc
     wire [31:0] pcCurrAddr;
-    wire [31:0] pcNextAddr;
+    wire [31:0] pcNextAddr, pcSelectAddr;
+    wire pcWrite;
     input [1:0] pcSrc;
 
     wire [31:0] pcSrcData[3:0];
     assign pcSrcData[0] = pcCurrAddr + 4;
-    Mux #(32, 4) pcSrcMux(pcSrcData, pcSrc, pcNextAddr);
+    Mux #(32, 4) pcSrcMux(pcSrcData, pcSrc, pcSelectAddr);
+
+    wire [31:0] pcHazardSrcData[1:0];
+    assign pcHazardSrcData[1] = pcSelectAddr;
+    assign pcHazardSrcData[0] = pcCurrAddr;
+    Mux pcHazardSrc(pcHazardSrcData, pcWrite, pcNextAddr);
     
     programCounter pc(clk, pcNextAddr, pcCurrAddr);
     //
-
+   
     //Inst Mem
     wire [31:0] instruction;
 
     MemoryBlock instMem(clk, pcCurrAddr,1'b0,,instruction);
     //
 
+    wire IFIDFlush;
     wire [31:0] IFIDPcAddr, IFIDInstruction;
-    Register IFID1 (clk, pcSrcData[0], IFIDPcAddr);
-    Register IFID2 (clk, instruction, IFIDInstruction);
+    EnRegister IFID1 (clk, pcSrcData[0], IFIDPcAddr, pcWrite);
+    EnRegister IFID2 (clk, instruction, IFIDInstruction, pcWrite);
     
 
     //Set Up Controller
@@ -32,6 +39,7 @@ module DataPath (clk, regSrc, regDst, pcSrc, ALUSrc, ALUOp, regWrite, memWrite, 
     assign opCode = IFIDInstruction[31:26];
     assign func = IFIDInstruction[5:0];
 
+    
     //Sign Extend
     wire [31:0] immediate;
     SignExtend signExtend(IFIDInstruction[15:0], immediate);
@@ -51,10 +59,9 @@ module DataPath (clk, regSrc, regDst, pcSrc, ALUSrc, ALUOp, regWrite, memWrite, 
     assign zero = regReadData1 == regReadData2;
     RegisterFile registerFile(clk, IFIDInstruction[25:21], IFIDInstruction[20:16], waddr, WBRegWrite, regWriteData, regReadData1, regReadData2);
     //
-
     wire [31:0] IDEXregReadData1, IDEXregReadData2, IDEXPcAddr, IDEXImmediate; 
     wire [10:0] IDEXRegWirteAddr;
-    wire [4:0] IDEXEX;
+    wire [4:0] IDEXEX, IDEXS;
     wire [1:0] IDEXM;
     wire [2:0] IDEXWB; 
     Register IDEX1(clk, regReadData1, IDEXregReadData1);
@@ -63,17 +70,37 @@ module DataPath (clk, regSrc, regDst, pcSrc, ALUSrc, ALUOp, regWrite, memWrite, 
     Register IDEX4(clk, immediate, IDEXImmediate);
     Register #(10) IDEX5(clk, {IFIDInstruction[20:16], IFIDInstruction[15:11]}, IDEXRegWirteAddr);
     Register #(5) IDEX6(clk, {ALUOp, ALUSrc, regDst}, IDEXEX);
-    Register #(2) IDEX7(clk, {memWrite, memRead}, IDEXM);
-    Register #(3) IDEX8(clk, {regSrc, regWrite}, IDEXWB);
+    Register #(2) IDEX7(clk, {memWrite &~IFIDFlush, memRead}, IDEXM);
+    Register #(3) IDEX8(clk, {regSrc, regWrite&~IFIDFlush}, IDEXWB);
+    Register #(5) IDEX9(clk, IFIDInstruction[25:21], IDEXS);
+
+    HazardUnit hazardUnit(IFIDInstruction[25:21], IFIDInstruction[20:16], 
+		IDEXM[0], IDEXRegWirteAddr[9:5], 
+		pcWrite, IFIDFlush);
 
     //ALU
     wire [31:0] rightOp, ALUResult;
     wire [31:0] ALUSrcData[1:0];
     wire [4:0] EXWaddr;
-    assign ALUSrcData[0] = IDEXregReadData2;
+    wire [1:0] ForwardA, ForwardB;
+
+    wire [31:0] leftForward[2:0], rightForward[2:0];
+    wire [31:0] EXMALUResult, leftOp; 
+
+    assign leftForward[2] = regWriteData;
+    assign leftForward[1] = EXMALUResult;
+    assign leftForward[0] = IDEXregReadData1;
+    Mux #(32, 3) LeftOpMux(leftForward, ForwardA, leftOp);
+
+    assign rightForward[2] = regWriteData;
+    assign rightForward[1] = EXMALUResult;
+    assign rightForward[0] = IDEXregReadData2;
+    Mux #(32, 3) RightOpMux(rightForward, ForwardB, ALUSrcData[0]);
+
     assign ALUSrcData[1] = IDEXImmediate;
     Mux #(32, 2) ALUSrcMux(ALUSrcData, IDEXEX[2], rightOp);
-    ALU alu(IDEXregReadData1, rightOp, IDEXEX[4:3], ALUResult,);
+
+    ALU alu(leftOp, rightOp, IDEXEX[4:3], ALUResult,);
 
     wire [4:0] regDstData[3:0];
     assign regDstData[0] = IDEXRegWirteAddr[9:5];
@@ -82,7 +109,7 @@ module DataPath (clk, regSrc, regDst, pcSrc, ALUSrc, ALUOp, regWrite, memWrite, 
     Mux #(5, 4) regWriteDstMux(regDstData, IDEXEX[1:0], EXWaddr);
     //
 
-    wire [31:0] EXMALUResult, EXMregReadData2;
+    wire [31:0] EXMregReadData2;
     wire [4:0] EXMWaddr;
     wire [1:0] EXMM;
     wire [2:0] EXMWB;
@@ -116,4 +143,10 @@ module DataPath (clk, regSrc, regDst, pcSrc, ALUSrc, ALUOp, regWrite, memWrite, 
     Mux #(32, 4) regWriteSrcMux(regSrcData, MWBWB[2:1], regWriteData);
     //
 
+    //Forwrd
+    ForwartingUnit forwartingUnit(  IDEXRegWirteAddr[9:5], IDEXS,
+		 	EXMWaddr, EXMWB[0],
+			ForwardA, ForwardB,
+		    MWBWaddr, MWBWB[0]);
+    //
 endmodule
