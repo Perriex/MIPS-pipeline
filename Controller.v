@@ -3,8 +3,8 @@
 module Controller( regSrc, regDst, pcSrc, ALUSrc, ALUOp, regWrite, memWrite,memRead , flush, zero, opCode, func);
 input zero;
 input[5:0] opCode,func;
-output reg [1:0] regDst,regSrc,pcSrc,ALUOp;
-output reg ALUSrc,regWrite,memWrite,memRead,flush;
+output reg [1:0] regDst = 0,regSrc = 0 ,pcSrc = 0,ALUOp = 0;
+output reg ALUSrc = 0,regWrite = 0,memWrite = 0,memRead = 0,flush = 0;
 
 parameter [5:0]
 	RTYPE = 0,ADDI = 8,SLTI = 10,LW = 35,SW = 43,J = 2,JAL = 3,BEQ = 4,BNE = 5;
@@ -12,9 +12,9 @@ parameter [5:0]
 parameter [5:0]
 	ADD = 32,SUB = 34,SLT = 42 , JR =  8;
 
-reg[2:0] ALUcontrol;
+reg[2:0] ALUcontrol = 0;
 reg [1:0] branchOC;
-always@(opCode)begin
+always@(opCode, func)begin
 	{regDst,regSrc,pcSrc,ALUcontrol,ALUSrc,regWrite,memWrite,branchOC,memRead} = 0;
 	case(opCode)
 		RTYPE:begin regSrc=2; regWrite= func==8 ? 0 : 1; memWrite=0; ALUSrc=0; regDst=1; ALUcontrol=3;  branchOC=0;end
@@ -30,7 +30,7 @@ always@(opCode)begin
 end
 
 reg branchF;
-always@(func)begin
+always@(func, ALUcontrol)begin
 	ALUOp = 0;branchF=0;
 	if(ALUcontrol == 3)begin
 		case(func)
@@ -43,7 +43,7 @@ always@(func)begin
 	else
 		ALUOp = ALUcontrol;
 end
-always@(zero)begin
+always@(zero, branchF, branchOC)begin
 	pcSrc = 0;flush = 0;
 	if(branchF == 1) pcSrc = 3;
 	else if(branchOC == 1)begin pcSrc = {1'b0,zero}; flush=zero; end
