@@ -10,5 +10,5 @@ Codes exits in "Codes.xlsx"
 
 
 # Credits
-Morteza Bahjat (mortezabahjat@gmail.com)
-Parna Asadi (parna80as@gmail.com)
+- Morteza Bahjat (mortezabahjat@gmail.com)
+- Parna Asadi (parna80as@gmail.com)
