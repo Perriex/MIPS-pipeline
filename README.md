@@ -1,4 +1,4 @@
-# MIPS-popline
+# MIPS-pipeline
 
 A verilog project implementing MIPS popline.
 
